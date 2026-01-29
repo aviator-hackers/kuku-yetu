@@ -1,0 +1,43 @@
+{
+  "name": "kuku-yetu-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Kuku Yetu Poultry E-commerce Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "node -e \"require('dotenv').config(); require('./scripts/migrate.js')\"",
+    "seed": "node -e \"require('dotenv').config(); require('./scripts/seed.js')\"",
+    "create-admin": "node -e \"require('dotenv').config(); require('./scripts/create-admin.js')\""
+  },
+  "dependencies": {
+    "axios": "^1.13.4",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^1.37.3",
+    "cors": "^2.8.6",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^6.11.2",
+    "express-validator": "^6.15.0",
+    "helmet": "^7.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.1",
+    "pg": "^8.17.2"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "ecommerce",
+    "poultry",
+    "express",
+    "postgresql"
+  ],
+  "author": "Kuku Yetu Team",
+  "license": "MIT"
+}
