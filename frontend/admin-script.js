@@ -12,6 +12,13 @@ const adminState = {
 // Backend base URL - define once, use everywhere
 const BACKEND_URL = 'https://kuku-yetu.onrender.com';
 
+// Global variable for Google Maps initialization
+window.initAdminMap = function() {
+    // This function will be called by Google Maps API
+    console.log('Google Maps initialized');
+    // You can initialize map here if needed
+};
+
 // Initialize admin panel
 document.addEventListener('DOMContentLoaded', function() {
     checkAdminAuth();
@@ -50,7 +57,7 @@ function checkAdminAuth() {
 
 async function verifyToken() {
     try {
-       const response = await fetch(`${BACKEND_URL}/api/admin/verify`, {
+        const response = await fetch(`${BACKEND_URL}/api/admin/verify`, {
             headers: {
                 'Authorization': `Bearer ${adminState.token}`
             }
@@ -62,12 +69,22 @@ async function verifyToken() {
     }
 }
 
-// Login form submission
+// Login form submission - FIXED VERSION
 document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
     const email = document.getElementById('adminEmail').value;
     const password = document.getElementById('adminPassword').value;
+    
+    // Clear any previous error messages
+    const errorElement = document.getElementById('loginError');
+    if (errorElement) errorElement.remove();
+    
+    // Show loading state
+    const submitBtn = this.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Logging in...';
+    submitBtn.disabled = true;
     
     try {
         const response = await fetch(`${BACKEND_URL}/api/admin/login`, {
@@ -75,28 +92,79 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ 
+                email: email.trim(),
+                password: password 
+            })
         });
         
         const data = await response.json();
         
-        if (data.success) {
+        if (response.ok && data.token) {
             // Save token and user info
             adminState.token = data.token;
-            adminState.user = data.user;
+            adminState.user = data.admin || data.user;
             
             localStorage.setItem('adminToken', data.token);
-            localStorage.setItem('adminUser', JSON.stringify(data.user));
+            localStorage.setItem('adminUser', JSON.stringify(adminState.user));
             
             // Switch to dashboard
             checkAdminAuth();
             showNotification('Login successful!', 'success');
         } else {
-            alert('Invalid credentials');
+            // Handle different error responses
+            let errorMessage = 'Invalid credentials';
+            
+            if (response.status === 400) {
+                errorMessage = data.message || 'Invalid email or password format';
+            } else if (response.status === 401) {
+                errorMessage = data.message || 'Invalid credentials';
+            } else if (response.status === 404) {
+                errorMessage = 'Admin account not found';
+            } else if (data.message) {
+                errorMessage = data.message;
+            }
+            
+            // Display error message
+            const errorDiv = document.createElement('div');
+            errorDiv.id = 'loginError';
+            errorDiv.style.cssText = `
+                background-color: #fee;
+                color: #c33;
+                padding: 10px;
+                border-radius: 5px;
+                margin-top: 10px;
+                border: 1px solid #fcc;
+                font-size: 14px;
+            `;
+            errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${errorMessage}`;
+            
+            this.appendChild(errorDiv);
+            
+            // Clear password field
+            document.getElementById('adminPassword').value = '';
         }
     } catch (error) {
         console.error('Login error:', error);
-        alert('Login failed. Please try again.');
+        
+        const errorDiv = document.createElement('div');
+        errorDiv.id = 'loginError';
+        errorDiv.style.cssText = `
+            background-color: #fee;
+            color: #c33;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            border: 1px solid #fcc;
+            font-size: 14px;
+        `;
+        errorDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error. Please try again.';
+        
+        this.appendChild(errorDiv);
+    } finally {
+        // Reset button state
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
     }
 });
 
@@ -109,6 +177,7 @@ function logout() {
     adminState.token = null;
     adminState.user = null;
     checkAdminAuth();
+    showNotification('Logged out successfully', 'info');
 }
 
 function updateAdminInfo() {
@@ -192,6 +261,11 @@ async function loadDashboardData() {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             })
         ]);
+
+        // Check if responses are OK
+        if (!ordersRes.ok) throw new Error('Failed to load orders');
+        if (!productsRes.ok) throw new Error('Failed to load products');
+        if (!statsRes.ok) throw new Error('Failed to load stats');
 
         adminState.orders = await ordersRes.json();
         adminState.products = await productsRes.json();
@@ -571,7 +645,21 @@ function loadAddProductContent() {
 
 // Customers Content
 async function loadCustomersContent() {
-    const customers = adminState.customers || [];
+    // Try to load customers from API
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/admin/customers`, {
+            headers: { 'Authorization': `Bearer ${adminState.token}` }
+        });
+        
+        if (response.ok) {
+            adminState.customers = await response.json();
+        }
+    } catch (error) {
+        console.error('Error loading customers:', error);
+        adminState.customers = [];
+    }
+    
+    const customers = adminState.customers;
     
     return `
         <div class="table-container">
@@ -616,152 +704,16 @@ async function loadCustomersContent() {
     `;
 }
 
-// Analytics Content
-function loadAnalyticsContent() {
-    return `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
-            <div class="chart-container">
-                <h3 style="margin-bottom: 1rem;">Sales Trend (Last 30 Days)</h3>
-                <div id="salesTrendChart" style="height: 300px;"></div>
-            </div>
-            
-            <div class="chart-container">
-                <h3 style="margin-bottom: 1rem;">Order Status Distribution</h3>
-                <div id="orderStatusChart" style="height: 300px;"></div>
-            </div>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
-            <div class="chart-container">
-                <h3 style="margin-bottom: 1rem;">Top Selling Products</h3>
-                <div id="topSellingChart" style="height: 300px;"></div>
-            </div>
-            
-            <div class="chart-container">
-                <h3 style="margin-bottom: 1rem;">Customer Acquisition</h3>
-                <div id="customerChart" style="height: 300px;"></div>
-            </div>
-        </div>
-        
-        <div class="table-container" style="margin-top: 2rem;">
-            <div class="table-header">
-                <h3>Sales Report</h3>
-                <div style="display: flex; gap: 0.5rem;">
-                    <select class="form-control" style="width: auto;">
-                        <option>Last 7 days</option>
-                        <option>Last 30 days</option>
-                        <option>Last 90 days</option>
-                        <option>This year</option>
-                    </select>
-                    <button class="btn btn-primary">
-                        <i class="fas fa-download"></i> Download Report
-                    </button>
-                </div>
-            </div>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Orders</th>
-                        <th>Revenue</th>
-                        <th>Avg. Order Value</th>
-                        <th>Conversion Rate</th>
-                        <th>New Customers</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Today</td>
-                        <td>15</td>
-                        <td>KSh 45,200</td>
-                        <td>KSh 3,013</td>
-                        <td>2.4%</td>
-                        <td>5</td>
-                    </tr>
-                    <tr>
-                        <td>Yesterday</td>
-                        <td>23</td>
-                        <td>KSh 62,500</td>
-                        <td>KSh 2,717</td>
-                        <td>3.1%</td>
-                        <td>8</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    `;
-}
-
-// Settings Content
-function loadSettingsContent() {
-    return `
-        <div class="upload-container">
-            <h3 style="margin-bottom: 1.5rem;">Store Settings</h3>
-            
-            <form id="settingsForm">
-                <div class="form-group">
-                    <label class="form-label">Store Name</label>
-                    <input type="text" class="form-control" value="Kuku Yetu">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Store Email</label>
-                    <input type="email" class="form-control" value="contact@kukuyetu.co.ke">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Store Phone</label>
-                    <input type="tel" class="form-control" value="+254 700 000 000">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Delivery Fee (KSh)</label>
-                    <input type="number" class="form-control" value="200">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Store Address</label>
-                    <textarea class="form-control" rows="3">Nairobi, Kenya</textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Business Hours</label>
-                    <input type="text" class="form-control" value="7:00 AM - 10:00 PM (Daily)">
-                </div>
-                
-                <h4 style="margin: 2rem 0 1rem 0;">Payment Settings</h4>
-                
-                <div class="form-group">
-                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
-                        <input type="checkbox" id="enableMpesa" checked>
-                        <label for="enableMpesa">Enable M-Pesa Payments</label>
-                    </div>
-                    
-                    <div style="display: flex; align-items: center; gap: 1rem;">
-                        <input type="checkbox" id="enableCard" checked>
-                        <label for="enableCard">Enable Card Payments</label>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-save"></i> Save Settings
-                    </button>
-                    <button type="button" class="btn btn-danger">
-                        <i class="fas fa-trash"></i> Clear Cache
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
-}
-
 // Order Functions
 async function viewOrderDetails(orderId) {
     try {
         const response = await fetch(`${BACKEND_URL}/api/admin/orders/${orderId}`, {
             headers: { 'Authorization': `Bearer ${adminState.token}` }
         });
+        
+        if (!response.ok) {
+            throw new Error('Failed to load order details');
+        }
         
         const order = await response.json();
         
@@ -782,22 +734,22 @@ async function viewOrderDetails(orderId) {
                     <div>
                         <h3 style="margin-bottom: 1rem;">Order Items</h3>
                         <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px;">
-                            ${order.items.map(item => `
+                            ${order.items && order.items.map(item => `
                                 <div style="display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0;">
                                     <div>
                                         <div style="font-weight: 500;">${item.title}</div>
                                         <div style="color: #64748b; font-size: 0.9rem;">Qty: ${item.quantity}</div>
                                     </div>
                                     <div style="font-weight: 500;">
-                                        KSh ${(item.price * item.quantity).toLocaleString()}
+                                        KSh ${((item.price || 0) * (item.quantity || 0)).toLocaleString()}
                                     </div>
                                 </div>
-                            `).join('')}
+                            `).join('') || 'No items found'}
                             
                             <div style="padding-top: 1rem;">
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                                     <span>Subtotal:</span>
-                                    <span>KSh ${(order.total_amount - 200).toLocaleString()}</span>
+                                    <span>KSh ${((order.total_amount || 0) - 200).toLocaleString()}</span>
                                 </div>
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                                     <span>Delivery:</span>
@@ -805,20 +757,22 @@ async function viewOrderDetails(orderId) {
                                 </div>
                                 <div style="display: flex; justify-content: space-between; font-size: 1.2rem; font-weight: bold; border-top: 2px solid #e2e8f0; padding-top: 0.5rem;">
                                     <span>Total:</span>
-                                    <span>KSh ${order.total_amount.toLocaleString()}</span>
+                                    <span>KSh ${(order.total_amount || 0).toLocaleString()}</span>
                                 </div>
                             </div>
                         </div>
                         
                         <h3 style="margin: 2rem 0 1rem 0;">Customer Information</h3>
                         <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px;">
-                            <p><strong>Name:</strong> ${order.customer_name}</p>
-                            <p><strong>Email:</strong> ${order.customer_email}</p>
-                            <p><strong>Phone:</strong> ${order.customer_phone}</p>
+                            <p><strong>Name:</strong> ${order.customer_name || 'N/A'}</p>
+                            <p><strong>Email:</strong> ${order.customer_email || 'N/A'}</p>
+                            <p><strong>Phone:</strong> ${order.customer_phone || 'N/A'}</p>
                             <p><strong>Delivery Location:</strong> 
-                                <button class="btn btn-sm btn-secondary" onclick="showOrderLocation(${order.delivery_lat}, ${order.delivery_lng})">
-                                    <i class="fas fa-map-marker-alt"></i> View on Map
-                                </button>
+                                ${order.delivery_lat && order.delivery_lng ? 
+                                    `<button class="btn btn-sm btn-secondary" onclick="showOrderLocation(${order.delivery_lat}, ${order.delivery_lng})">
+                                        <i class="fas fa-map-marker-alt"></i> View on Map
+                                    </button>` : 
+                                    'N/A'}
                             </p>
                         </div>
                     </div>
@@ -840,7 +794,7 @@ async function viewOrderDetails(orderId) {
                             <div style="margin-bottom: 1rem;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem;">Payment Status</div>
                                 <span class="status-badge ${order.payment_status === 'completed' ? 'status-paid' : 'status-pending'}">
-                                    ${order.payment_status}
+                                    ${order.payment_status || 'pending'}
                                 </span>
                             </div>
                             
@@ -852,11 +806,13 @@ async function viewOrderDetails(orderId) {
                             </div>
                         </div>
                         
+                        ${order.status !== 'delivered' ? `
                         <div style="margin-top: 2rem;">
                             <button class="btn btn-success" style="width: 100%;" onclick="confirmReceipt('${order.order_id}')">
                                 <i class="fas fa-check"></i> Confirm Receipt & Notify Customer
                             </button>
                         </div>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -889,11 +845,12 @@ async function confirmReceipt(orderId) {
             closeModal('orderDetailModal');
             loadSection('orders'); // Refresh orders list
         } else {
-            throw new Error('Failed to confirm order');
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to confirm order');
         }
     } catch (error) {
         console.error('Error confirming order:', error);
-        showNotification('Failed to confirm order', 'error');
+        showNotification(error.message || 'Failed to confirm order', 'error');
     }
 }
 
@@ -910,56 +867,91 @@ async function updateOrderStatus(orderId, status) {
         
         if (response.ok) {
             showNotification('Order status updated', 'success');
+            // Update local state
+            const order = adminState.orders.find(o => o.order_id === orderId);
+            if (order) {
+                order.status = status;
+            }
+        } else {
+            const errorData = await response.json();
+            throw new Error(errorData.message || 'Failed to update status');
         }
     } catch (error) {
         console.error('Error updating order status:', error);
-        showNotification('Failed to update status', 'error');
+        showNotification(error.message || 'Failed to update status', 'error');
     }
 }
 
-// Map Functions
+// Map Functions - FIXED
 let adminMap = null;
 
-function initAdminMap() {
-    // Initialize map for admin panel
-}
-
-function showOrderLocation(lat, lng) {
+// Make showOrderLocation globally available
+window.showOrderLocation = function(lat, lng) {
     const modal = document.getElementById('mapModal');
+    const mapElement = document.getElementById('adminMap');
     
+    if (!mapElement) {
+        showNotification('Map element not found', 'error');
+        return;
+    }
+    
+    modal.style.display = 'flex';
+    
+    // Initialize map if not already initialized
     if (!adminMap) {
-        adminMap = new google.maps.Map(document.getElementById('adminMap'), {
-            center: { lat, lng },
+        adminMap = new google.maps.Map(mapElement, {
+            center: { lat: parseFloat(lat), lng: parseFloat(lng) },
             zoom: 15,
             mapTypeControl: true,
             streetViewControl: true
         });
     } else {
-        adminMap.setCenter({ lat, lng });
+        adminMap.setCenter({ lat: parseFloat(lat), lng: parseFloat(lng) });
+    }
+    
+    // Clear existing markers
+    if (window.adminMarker) {
+        window.adminMarker.setMap(null);
     }
     
     // Add marker
-    new google.maps.Marker({
-        position: { lat, lng },
+    window.adminMarker = new google.maps.Marker({
+        position: { lat: parseFloat(lat), lng: parseFloat(lng) },
         map: adminMap,
         title: "Delivery Location"
     });
-    
-    modal.style.display = 'flex';
 }
 
-function closeModal(modalId) {
-    document.getElementById(modalId).style.display = 'none';
-}
+// Make closeModal globally available
+window.closeModal = function(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'none';
+    }
+};
 
 // Chart Functions
 function renderDashboardCharts() {
+    // Check if Google Charts is available
+    if (typeof google === 'undefined') {
+        console.warn('Google Charts not loaded');
+        return;
+    }
+    
     // Load Google Charts
     google.charts.load('current', { packages: ['corechart'] });
     google.charts.setOnLoadCallback(drawCharts);
 }
 
 function drawCharts() {
+    // Check if elements exist
+    const revenueChartEl = document.getElementById('revenueChart');
+    const topProductsChartEl = document.getElementById('topProductsChart');
+    
+    if (!revenueChartEl || !topProductsChartEl) {
+        return;
+    }
+    
     // Revenue Chart
     const revenueData = google.visualization.arrayToDataTable([
         ['Day', 'Revenue'],
@@ -985,7 +977,7 @@ function drawCharts() {
         }
     };
 
-    const revenueChart = new google.visualization.LineChart(document.getElementById('revenueChart'));
+    const revenueChart = new google.visualization.LineChart(revenueChartEl);
     revenueChart.draw(revenueData, revenueOptions);
 
     // Top Products Chart
@@ -1006,7 +998,7 @@ function drawCharts() {
         legend: { textStyle: { color: '#64748b' } }
     };
 
-    const productChart = new google.visualization.PieChart(document.getElementById('topProductsChart'));
+    const productChart = new google.visualization.PieChart(topProductsChartEl);
     productChart.draw(productData, productOptions);
 }
 
@@ -1017,8 +1009,10 @@ async function loadNotifications() {
             headers: { 'Authorization': `Bearer ${adminState.token}` }
         });
         
-        adminState.notifications = await response.json();
-        updateNotificationCounts();
+        if (response.ok) {
+            adminState.notifications = await response.json();
+            updateNotificationCounts();
+        }
     } catch (error) {
         console.error('Error loading notifications:', error);
     }
@@ -1027,13 +1021,22 @@ async function loadNotifications() {
 function updateNotificationCounts() {
     const pendingOrders = adminState.orders.filter(o => o.status === 'pending').length;
     
-    document.getElementById('orderNotification').textContent = pendingOrders;
-    document.getElementById('globalNotification').textContent = adminState.notifications.length;
+    const orderNotification = document.getElementById('orderNotification');
+    const globalNotification = document.getElementById('globalNotification');
+    
+    if (orderNotification) {
+        orderNotification.textContent = pendingOrders;
+    }
+    
+    if (globalNotification) {
+        globalNotification.textContent = adminState.notifications.length;
+    }
 }
 
 function showNotification(message, type = 'info') {
     // Create and show notification
     const notification = document.createElement('div');
+    notification.className = 'admin-notification';
     notification.style.cssText = `
         position: fixed;
         top: 20px;
@@ -1045,6 +1048,7 @@ function showNotification(message, type = 'info') {
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         z-index: 10000;
         animation: slideIn 0.3s ease;
+        max-width: 400px;
     `;
     
     notification.innerHTML = `
@@ -1059,10 +1063,27 @@ function showNotification(message, type = 'info') {
     setTimeout(() => {
         notification.style.animation = 'slideOut 0.3s ease';
         setTimeout(() => {
-            document.body.removeChild(notification);
+            if (notification.parentNode) {
+                document.body.removeChild(notification);
+            }
         }, 300);
     }, 3000);
 }
+
+// Make other functions globally available
+window.loadSection = loadSection;
+window.viewOrderDetails = viewOrderDetails;
+window.confirmReceipt = confirmReceipt;
+window.updateOrderStatus = updateOrderStatus;
+window.exportOrders = exportOrders;
+window.editProduct = function(id) {
+    showNotification('Edit product feature coming soon', 'info');
+};
+window.deleteProduct = function(id) {
+    if (confirm('Are you sure you want to delete this product?')) {
+        showNotification('Product deleted (demo)', 'success');
+    }
+};
 
 // Export functions
 function exportOrders() {
@@ -1083,18 +1104,21 @@ function exportOrders() {
 }
 
 function convertToCSV(data) {
+    if (!data.length) return '';
     const headers = Object.keys(data[0]);
-    const rows = data.map(row => headers.map(header => `"${row[header]}"`).join(','));
+    const rows = data.map(row => headers.map(header => `"${row[header] || ''}"`).join(','));
     return [headers.join(','), ...rows].join('\n');
 }
 
 function downloadCSV(csv, filename) {
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
 }
 
@@ -1120,6 +1144,11 @@ document.addEventListener('change', function(e) {
         const files = Array.from(e.target.files);
         const preview = document.getElementById('imagePreview');
         
+        if (!preview) return;
+        
+        // Clear existing previews
+        preview.innerHTML = '';
+        
         files.forEach(file => {
             if (file.size > 5 * 1024 * 1024) {
                 alert(`File ${file.name} is too large. Maximum size is 5MB.`);
@@ -1131,10 +1160,12 @@ document.addEventListener('change', function(e) {
                 const imgContainer = document.createElement('div');
                 imgContainer.style.position = 'relative';
                 imgContainer.style.display = 'inline-block';
+                imgContainer.style.margin = '5px';
                 
                 imgContainer.innerHTML = `
-                    <img src="${e.target.result}" class="preview-image">
-                    <button class="remove-image" onclick="removePreviewImage(this)">
+                    <img src="${e.target.result}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px;">
+                    <button class="remove-image" onclick="this.parentElement.remove()" 
+                            style="position: absolute; top: 5px; right: 5px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; font-size: 12px;">
                         <i class="fas fa-times"></i>
                     </button>
                 `;
@@ -1145,10 +1176,6 @@ document.addEventListener('change', function(e) {
         });
     }
 });
-
-function removePreviewImage(button) {
-    button.parentElement.remove();
-}
 
 // Handle product form submission
 document.addEventListener('submit', async function(e) {
@@ -1182,11 +1209,12 @@ document.addEventListener('submit', async function(e) {
                 showNotification('Product added successfully!', 'success');
                 loadSection('products');
             } else {
-                throw new Error('Failed to add product');
+                const errorData = await response.json();
+                throw new Error(errorData.message || 'Failed to add product');
             }
         } catch (error) {
             console.error('Error adding product:', error);
-            showNotification('Failed to add product', 'error');
+            showNotification(error.message || 'Failed to add product', 'error');
         }
     }
 });
@@ -1231,6 +1259,19 @@ adminStyle.textContent = `
             box-shadow: none !important;
             border: 1px solid #ddd !important;
         }
+    }
+    
+    .admin-notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 1rem 1.5rem;
+        background: #f97316;
+        color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
     }
 `;
 document.head.appendChild(adminStyle);
