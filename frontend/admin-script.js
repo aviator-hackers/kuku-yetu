@@ -176,19 +176,22 @@ async function loadSection(section) {
 }
 
 // Load dashboard data
+// FIND THIS FUNCTION:
 async function loadDashboardData() {
     try {
         const [ordersRes, productsRes, statsRes] = await Promise.all([
-            fetch('https://your-backend.onrender.com/api/admin/orders', {
+            // CHANGE THESE THREE LINES:
+            fetch('https://kuku-yetu.onrender.com/api/admin/orders', {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             }),
-            fetch('https://your-backend.onrender.com/api/admin/products', {
+            fetch('https://kuku-yetu.onrender.com/api/admin/products', {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             }),
-            fetch('https://your-backend.onrender.com/api/admin/stats', {
+            fetch('https://kuku-yetu.onrender.com/api/admin/stats', {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             })
         ]);
+        // ... rest of code
 
         adminState.orders = await ordersRes.json();
         adminState.products = await productsRes.json();
