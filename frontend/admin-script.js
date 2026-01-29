@@ -67,7 +67,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
     const password = document.getElementById('adminPassword').value;
     
     try {
-        const response = await fetch('https://your-backend.onrender.com/api/admin/login', {
+        const response = await fetch('https://kuku-yetu.onrender.com//api/admin/login', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
