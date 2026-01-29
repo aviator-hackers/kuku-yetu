@@ -9,6 +9,9 @@ const adminState = {
     notifications: []
 };
 
+// Backend base URL - define once, use everywhere
+const BACKEND_URL = 'https://kuku-yetu.onrender.com';
+
 // Initialize admin panel
 document.addEventListener('DOMContentLoaded', function() {
     checkAdminAuth();
@@ -47,7 +50,7 @@ function checkAdminAuth() {
 
 async function verifyToken() {
     try {
-       const response = await fetch('https://kuku-yetu.onrender.com/api/admin/verify', {
+       const response = await fetch(`${BACKEND_URL}/api/admin/verify`, {
             headers: {
                 'Authorization': `Bearer ${adminState.token}`
             }
@@ -67,7 +70,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
     const password = document.getElementById('adminPassword').value;
     
     try {
-        const response = await fetch('https://kuku-yetu.onrender.com/api/admin/login', {
+        const response = await fetch(`${BACKEND_URL}/api/admin/login`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -176,22 +179,19 @@ async function loadSection(section) {
 }
 
 // Load dashboard data
-// FIND THIS FUNCTION:
 async function loadDashboardData() {
     try {
         const [ordersRes, productsRes, statsRes] = await Promise.all([
-            // CHANGE THESE THREE LINES:
-            fetch('https://kuku-yetu.onrender.com/api/admin/orders', {
+            fetch(`${BACKEND_URL}/api/admin/orders`, {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             }),
-            fetch('https://kuku-yetu.onrender.com/api/admin/products', {
+            fetch(`${BACKEND_URL}/api/admin/products`, {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             }),
-            fetch('https://kuku-yetu.onrender.com/api/admin/stats', {
+            fetch(`${BACKEND_URL}/api/admin/stats`, {
                 headers: { 'Authorization': `Bearer ${adminState.token}` }
             })
         ]);
-        // ... rest of code
 
         adminState.orders = await ordersRes.json();
         adminState.products = await productsRes.json();
@@ -759,7 +759,7 @@ function loadSettingsContent() {
 // Order Functions
 async function viewOrderDetails(orderId) {
     try {
-        const response = await fetch(`https://your-backend.onrender.com/api/admin/orders/${orderId}`, {
+        const response = await fetch(`${BACKEND_URL}/api/admin/orders/${orderId}`, {
             headers: { 'Authorization': `Bearer ${adminState.token}` }
         });
         
@@ -873,7 +873,7 @@ async function confirmReceipt(orderId) {
     if (!confirm('Confirm receipt of this order and notify customer?')) return;
     
     try {
-        const response = await fetch(`https://your-backend.onrender.com/api/admin/orders/${orderId}/confirm`, {
+        const response = await fetch(`${BACKEND_URL}/api/admin/orders/${orderId}/confirm`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${adminState.token}`,
@@ -899,7 +899,7 @@ async function confirmReceipt(orderId) {
 
 async function updateOrderStatus(orderId, status) {
     try {
-        const response = await fetch(`https://your-backend.onrender.com/api/admin/orders/${orderId}/status`, {
+        const response = await fetch(`${BACKEND_URL}/api/admin/orders/${orderId}/status`, {
             method: 'PUT',
             headers: {
                 'Authorization': `Bearer ${adminState.token}`,
@@ -1013,7 +1013,7 @@ function drawCharts() {
 // Notifications
 async function loadNotifications() {
     try {
-        const response = await fetch('https://your-backend.onrender.com/api/admin/notifications', {
+        const response = await fetch(`${BACKEND_URL}/api/admin/notifications`, {
             headers: { 'Authorization': `Bearer ${adminState.token}` }
         });
         
@@ -1170,7 +1170,7 @@ document.addEventListener('submit', async function(e) {
         }
         
         try {
-            const response = await fetch('https://your-backend.onrender.com/api/admin/products', {
+            const response = await fetch(`${BACKEND_URL}/api/admin/products`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${adminState.token}`
