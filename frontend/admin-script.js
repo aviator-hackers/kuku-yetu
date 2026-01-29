@@ -69,7 +69,7 @@ async function verifyToken() {
     }
 }
 
-// Login form submission - FIXED VERSION
+// Login form submission - SIMPLIFIED AND DEBUGGED VERSION
 document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
@@ -87,42 +87,93 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
     submitBtn.disabled = true;
     
     try {
-        const response = await fetch(`${BACKEND_URL}/api/admin/login`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                email: email.trim(),
-                password: password 
-            })
-        });
+        console.log('Attempting login with:', { email: email.substring(0, 3) + '...' });
         
-        const data = await response.json();
+        // Try different payload formats if one fails
+        const payloads = [
+            // Format 1: Standard format
+            { email: email.trim(), password: password },
+            // Format 2: Some APIs use username field
+            { username: email.trim(), password: password },
+            // Format 3: Lowercase email
+            { email: email.trim().toLowerCase(), password: password }
+        ];
         
-        if (response.ok && data.token) {
-            // Save token and user info
-            adminState.token = data.token;
-            adminState.user = data.admin || data.user;
+        let response;
+        let responseData;
+        
+        // Try each payload format
+        for (let i = 0; i < payloads.length; i++) {
+            try {
+                console.log(`Trying payload format ${i + 1}:`, payloads[i]);
+                
+                response = await fetch(`${BACKEND_URL}/api/admin/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(payloads[i])
+                });
+                
+                const responseText = await response.text();
+                console.log(`Response ${i + 1} - Status:`, response.status, 'Response:', responseText.substring(0, 200));
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error('Failed to parse JSON:', responseText);
+                    continue; // Try next format
+                }
+                
+                if (response.ok) {
+                    break; // Success, exit loop
+                }
+                
+            } catch (requestError) {
+                console.error(`Request format ${i + 1} failed:`, requestError);
+                if (i === payloads.length - 1) {
+                    throw requestError; // All formats failed
+                }
+            }
+        }
+        
+        if (response.ok) {
+            console.log('Login successful:', responseData);
             
-            localStorage.setItem('adminToken', data.token);
-            localStorage.setItem('adminUser', JSON.stringify(adminState.user));
+            // Handle different response structures
+            const token = responseData.token || responseData.accessToken || responseData.data?.token;
+            const user = responseData.admin || responseData.user || responseData.data || { email: email };
+            
+            if (!token) {
+                throw new Error('No authentication token received');
+            }
+            
+            // Save token and user info
+            adminState.token = token;
+            adminState.user = user;
+            
+            localStorage.setItem('adminToken', token);
+            localStorage.setItem('adminUser', JSON.stringify(user));
             
             // Switch to dashboard
             checkAdminAuth();
             showNotification('Login successful!', 'success');
+            
         } else {
-            // Handle different error responses
-            let errorMessage = 'Invalid credentials';
+            console.log('Login failed:', responseData);
+            
+            // Determine error message
+            let errorMessage = 'Login failed. Please try again.';
             
             if (response.status === 400) {
-                errorMessage = data.message || 'Invalid email or password format';
+                errorMessage = responseData.message || 'Invalid request format. Please check your email and password.';
             } else if (response.status === 401) {
-                errorMessage = data.message || 'Invalid credentials';
+                errorMessage = responseData.message || 'Invalid email or password.';
             } else if (response.status === 404) {
-                errorMessage = 'Admin account not found';
-            } else if (data.message) {
-                errorMessage = data.message;
+                errorMessage = 'Admin login endpoint not found.';
+            } else if (responseData && responseData.message) {
+                errorMessage = responseData.message;
             }
             
             // Display error message
@@ -144,6 +195,7 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             // Clear password field
             document.getElementById('adminPassword').value = '';
         }
+        
     } catch (error) {
         console.error('Login error:', error);
         
@@ -158,7 +210,12 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             border: 1px solid #fcc;
             font-size: 14px;
         `;
-        errorDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error. Please try again.';
+        
+        if (error.message.includes('Network') || error.message.includes('Failed to fetch')) {
+            errorDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error. Please check your connection.';
+        } else {
+            errorDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${error.message}`;
+        }
         
         this.appendChild(errorDiv);
     } finally {
@@ -182,7 +239,7 @@ function logout() {
 
 function updateAdminInfo() {
     if (adminState.user) {
-        document.getElementById('adminName').textContent = adminState.user.name || adminState.user.email;
+        document.getElementById('adminName').textContent = adminState.user.name || adminState.user.email || 'Admin';
     }
 }
 
@@ -201,6 +258,13 @@ function setupEventListeners() {
             // Load section
             loadSection(section);
         });
+    });
+    
+    // Close modals when clicking outside
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('modal')) {
+            e.target.style.display = 'none';
+        }
     });
 }
 
@@ -244,6 +308,11 @@ async function loadSection(section) {
             pageTitle.textContent = 'Settings';
             contentArea.innerHTML = loadSettingsContent();
             break;
+            
+        default:
+            pageTitle.textContent = 'Dashboard';
+            contentArea.innerHTML = await loadDashboardContent();
+            renderDashboardCharts();
     }
 }
 
@@ -374,17 +443,17 @@ async function loadDashboardContent() {
                 <tbody>
                     ${adminState.orders.slice(0, 5).map(order => `
                         <tr>
-                            <td>${order.order_id}</td>
-                            <td>${order.customer_name}</td>
-                            <td>KSh ${order.total_amount.toLocaleString()}</td>
+                            <td>${order.order_id || order.id || 'N/A'}</td>
+                            <td>${order.customer_name || 'N/A'}</td>
+                            <td>KSh ${(order.total_amount || 0).toLocaleString()}</td>
                             <td>
-                                <span class="status-badge status-${order.status}">
-                                    ${order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                                <span class="status-badge status-${order.status || 'pending'}">
+                                    ${(order.status || 'pending').charAt(0).toUpperCase() + (order.status || 'pending').slice(1)}
                                 </span>
                             </td>
-                            <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                            <td>${order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}</td>
                             <td>
-                                <button class="btn btn-sm btn-secondary" onclick="viewOrderDetails('${order.order_id}')">
+                                <button class="btn btn-sm btn-secondary" onclick="viewOrderDetails('${order.order_id || order.id}')">
                                     <i class="fas fa-eye"></i>
                                 </button>
                             </td>
@@ -434,39 +503,41 @@ async function loadOrdersContent() {
                 <tbody>
                     ${orders.map(order => `
                         <tr>
-                            <td>${order.order_id}</td>
+                            <td>${order.order_id || order.id || 'N/A'}</td>
                             <td>
-                                <div>${order.customer_name}</div>
-                                <small style="color: #64748b;">${order.customer_email}</small>
+                                <div>${order.customer_name || 'N/A'}</div>
+                                <small style="color: #64748b;">${order.customer_email || ''}</small>
                             </td>
-                            <td>${order.customer_phone}</td>
-                            <td>KSh ${order.total_amount.toLocaleString()}</td>
+                            <td>${order.customer_phone || 'N/A'}</td>
+                            <td>KSh ${(order.total_amount || 0).toLocaleString()}</td>
                             <td>
-                                <select class="status-select form-control" data-order-id="${order.order_id}" style="width: 120px; padding: 0.25rem;">
-                                    <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Pending</option>
-                                    <option value="paid" ${order.status === 'paid' ? 'selected' : ''}>Paid</option>
-                                    <option value="processing" ${order.status === 'processing' ? 'selected' : ''}>Processing</option>
-                                    <option value="delivered" ${order.status === 'delivered' ? 'selected' : ''}>Delivered</option>
-                                    <option value="cancelled" ${order.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+                                <select class="status-select form-control" data-order-id="${order.order_id || order.id}" style="width: 120px; padding: 0.25rem;">
+                                    <option value="pending" ${(order.status || 'pending') === 'pending' ? 'selected' : ''}>Pending</option>
+                                    <option value="paid" ${(order.status || 'pending') === 'paid' ? 'selected' : ''}>Paid</option>
+                                    <option value="processing" ${(order.status || 'pending') === 'processing' ? 'selected' : ''}>Processing</option>
+                                    <option value="delivered" ${(order.status || 'pending') === 'delivered' ? 'selected' : ''}>Delivered</option>
+                                    <option value="cancelled" ${(order.status || 'pending') === 'cancelled' ? 'selected' : ''}>Cancelled</option>
                                 </select>
                             </td>
                             <td>
-                                <span class="status-badge ${order.payment_status === 'completed' ? 'status-paid' : 'status-pending'}">
-                                    ${order.payment_status}
+                                <span class="status-badge ${(order.payment_status || 'pending') === 'completed' ? 'status-paid' : 'status-pending'}">
+                                    ${order.payment_status || 'pending'}
                                 </span>
                             </td>
-                            <td>${new Date(order.created_at).toLocaleString()}</td>
+                            <td>${order.created_at ? new Date(order.created_at).toLocaleString() : 'N/A'}</td>
                             <td>
                                 <div style="display: flex; gap: 0.25rem;">
-                                    <button class="btn btn-sm btn-secondary" onclick="viewOrderDetails('${order.order_id}')" title="View Details">
+                                    <button class="btn btn-sm btn-secondary" onclick="viewOrderDetails('${order.order_id || order.id}')" title="View Details">
                                         <i class="fas fa-eye"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-success" onclick="confirmReceipt('${order.order_id}')" title="Confirm Receipt">
+                                    <button class="btn btn-sm btn-success" onclick="confirmReceipt('${order.order_id || order.id}')" title="Confirm Receipt">
                                         <i class="fas fa-check"></i>
                                     </button>
+                                    ${order.delivery_lat && order.delivery_lng ? `
                                     <button class="btn btn-sm btn-primary" onclick="showOrderLocation(${order.delivery_lat}, ${order.delivery_lng})" title="View Location">
                                         <i class="fas fa-map-marker-alt"></i>
                                     </button>
+                                    ` : ''}
                                 </div>
                             </td>
                         </tr>
@@ -515,25 +586,25 @@ async function loadProductsContent() {
                         <tr>
                             <td>
                                 <div style="display: flex; align-items: center; gap: 1rem;">
-                                    <img src="${product.images[0] || 'https://via.placeholder.com/50x50?text=Product'}" 
-                                         alt="${product.title}" 
+                                    <img src="${product.images && product.images[0] ? product.images[0] : 'https://via.placeholder.com/50x50?text=Product'}" 
+                                         alt="${product.title || 'Product'}" 
                                          style="width: 50px; height: 50px; object-fit: cover; border-radius: 6px;">
                                     <div>
-                                        <div style="font-weight: 500;">${product.title}</div>
-                                        <small style="color: #64748b;">${product.description.substring(0, 50)}...</small>
+                                        <div style="font-weight: 500;">${product.title || 'Untitled Product'}</div>
+                                        <small style="color: #64748b;">${(product.description || '').substring(0, 50)}...</small>
                                     </div>
                                 </div>
                             </td>
                             <td>
                                 <span class="status-badge status-processing">
-                                    ${product.type}
+                                    ${product.type || 'Unknown'}
                                 </span>
                             </td>
-                            <td>KSh ${product.price.toLocaleString()}</td>
+                            <td>KSh ${(product.price || 0).toLocaleString()}</td>
                             <td>
                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <span>${product.quantity}</span>
-                                    ${product.quantity < 10 ? '<span style="color: var(--danger-color); font-size: 0.8rem;">Low!</span>' : ''}
+                                    <span>${product.quantity || 0}</span>
+                                    ${(product.quantity || 0) < 10 ? '<span style="color: var(--danger-color); font-size: 0.8rem;">Low!</span>' : ''}
                                 </div>
                             </td>
                             <td>
@@ -653,6 +724,8 @@ async function loadCustomersContent() {
         
         if (response.ok) {
             adminState.customers = await response.json();
+        } else {
+            adminState.customers = [];
         }
     } catch (error) {
         console.error('Error loading customers:', error);
@@ -684,10 +757,10 @@ async function loadCustomersContent() {
                     ${customers.map(customer => `
                         <tr>
                             <td>
-                                <div style="font-weight: 500;">${customer.name}</div>
+                                <div style="font-weight: 500;">${customer.name || 'Unknown'}</div>
                             </td>
-                            <td>${customer.email}</td>
-                            <td>${customer.phone}</td>
+                            <td>${customer.email || 'N/A'}</td>
+                            <td>${customer.phone || 'N/A'}</td>
                             <td>${customer.order_count || 0}</td>
                             <td>KSh ${(customer.total_spent || 0).toLocaleString()}</td>
                             <td>${customer.last_order ? new Date(customer.last_order).toLocaleDateString() : 'Never'}</td>
@@ -700,6 +773,146 @@ async function loadCustomersContent() {
                     `).join('')}
                 </tbody>
             </table>
+        </div>
+    `;
+}
+
+// Analytics Content
+function loadAnalyticsContent() {
+    return `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem;">Sales Trend (Last 30 Days)</h3>
+                <div id="salesTrendChart" style="height: 300px;"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem;">Order Status Distribution</h3>
+                <div id="orderStatusChart" style="height: 300px;"></div>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem;">Top Selling Products</h3>
+                <div id="topSellingChart" style="height: 300px;"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3 style="margin-bottom: 1rem;">Customer Acquisition</h3>
+                <div id="customerChart" style="height: 300px;"></div>
+            </div>
+        </div>
+        
+        <div class="table-container" style="margin-top: 2rem;">
+            <div class="table-header">
+                <h3>Sales Report</h3>
+                <div style="display: flex; gap: 0.5rem;">
+                    <select class="form-control" style="width: auto;">
+                        <option>Last 7 days</option>
+                        <option>Last 30 days</option>
+                        <option>Last 90 days</option>
+                        <option>This year</option>
+                    </select>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-download"></i> Download Report
+                    </button>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Orders</th>
+                        <th>Revenue</th>
+                        <th>Avg. Order Value</th>
+                        <th>Conversion Rate</th>
+                        <th>New Customers</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Today</td>
+                        <td>15</td>
+                        <td>KSh 45,200</td>
+                        <td>KSh 3,013</td>
+                        <td>2.4%</td>
+                        <td>5</td>
+                    </tr>
+                    <tr>
+                        <td>Yesterday</td>
+                        <td>23</td>
+                        <td>KSh 62,500</td>
+                        <td>KSh 2,717</td>
+                        <td>3.1%</td>
+                        <td>8</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+}
+
+// Settings Content
+function loadSettingsContent() {
+    return `
+        <div class="upload-container">
+            <h3 style="margin-bottom: 1.5rem;">Store Settings</h3>
+            
+            <form id="settingsForm">
+                <div class="form-group">
+                    <label class="form-label">Store Name</label>
+                    <input type="text" class="form-control" value="Kuku Yetu">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Store Email</label>
+                    <input type="email" class="form-control" value="contact@kukuyetu.co.ke">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Store Phone</label>
+                    <input type="tel" class="form-control" value="+254 700 000 000">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Delivery Fee (KSh)</label>
+                    <input type="number" class="form-control" value="200">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Store Address</label>
+                    <textarea class="form-control" rows="3">Nairobi, Kenya</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Business Hours</label>
+                    <input type="text" class="form-control" value="7:00 AM - 10:00 PM (Daily)">
+                </div>
+                
+                <h4 style="margin: 2rem 0 1rem 0;">Payment Settings</h4>
+                
+                <div class="form-group">
+                    <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                        <input type="checkbox" id="enableMpesa" checked>
+                        <label for="enableMpesa">Enable M-Pesa Payments</label>
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <input type="checkbox" id="enableCard" checked>
+                        <label for="enableCard">Enable Card Payments</label>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                    <button type="button" class="btn btn-danger">
+                        <i class="fas fa-trash"></i> Clear Cache
+                    </button>
+                </div>
+            </form>
         </div>
     `;
 }
@@ -718,12 +931,17 @@ async function viewOrderDetails(orderId) {
         const order = await response.json();
         
         const modal = document.getElementById('orderDetailModal');
+        if (!modal) {
+            console.error('Modal element not found');
+            return;
+        }
+        
         modal.querySelector('.modal-content').innerHTML = `
             <div style="padding: 2rem;">
                 <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2rem;">
                     <div>
-                        <h2>Order #${order.order_id}</h2>
-                        <p style="color: #64748b;">Placed on ${new Date(order.created_at).toLocaleString()}</p>
+                        <h2>Order #${order.order_id || order.id}</h2>
+                        <p style="color: #64748b;">Placed on ${order.created_at ? new Date(order.created_at).toLocaleString() : 'Unknown date'}</p>
                     </div>
                     <button class="btn btn-secondary" onclick="closeModal('orderDetailModal')">
                         <i class="fas fa-times"></i>
@@ -734,17 +952,17 @@ async function viewOrderDetails(orderId) {
                     <div>
                         <h3 style="margin-bottom: 1rem;">Order Items</h3>
                         <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px;">
-                            ${order.items && order.items.map(item => `
+                            ${order.items && order.items.length > 0 ? order.items.map(item => `
                                 <div style="display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0;">
                                     <div>
-                                        <div style="font-weight: 500;">${item.title}</div>
-                                        <div style="color: #64748b; font-size: 0.9rem;">Qty: ${item.quantity}</div>
+                                        <div style="font-weight: 500;">${item.title || 'Unknown Item'}</div>
+                                        <div style="color: #64748b; font-size: 0.9rem;">Qty: ${item.quantity || 1}</div>
                                     </div>
                                     <div style="font-weight: 500;">
-                                        KSh ${((item.price || 0) * (item.quantity || 0)).toLocaleString()}
+                                        KSh ${((item.price || 0) * (item.quantity || 1)).toLocaleString()}
                                     </div>
                                 </div>
-                            `).join('') || 'No items found'}
+                            `).join('') : '<p>No items found</p>'}
                             
                             <div style="padding-top: 1rem;">
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
@@ -782,18 +1000,18 @@ async function viewOrderDetails(orderId) {
                         <div style="background: #f8fafc; padding: 1.5rem; border-radius: 8px;">
                             <div style="margin-bottom: 1rem;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem;">Current Status</div>
-                                <select class="form-control" onchange="updateOrderStatus('${order.order_id}', this.value)">
-                                    <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Pending</option>
-                                    <option value="paid" ${order.status === 'paid' ? 'selected' : ''}>Paid</option>
-                                    <option value="processing" ${order.status === 'processing' ? 'selected' : ''}>Processing</option>
-                                    <option value="delivered" ${order.status === 'delivered' ? 'selected' : ''}>Delivered</option>
-                                    <option value="cancelled" ${order.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+                                <select class="form-control" onchange="updateOrderStatus('${order.order_id || order.id}', this.value)">
+                                    <option value="pending" ${(order.status || 'pending') === 'pending' ? 'selected' : ''}>Pending</option>
+                                    <option value="paid" ${(order.status || 'pending') === 'paid' ? 'selected' : ''}>Paid</option>
+                                    <option value="processing" ${(order.status || 'pending') === 'processing' ? 'selected' : ''}>Processing</option>
+                                    <option value="delivered" ${(order.status || 'pending') === 'delivered' ? 'selected' : ''}>Delivered</option>
+                                    <option value="cancelled" ${(order.status || 'pending') === 'cancelled' ? 'selected' : ''}>Cancelled</option>
                                 </select>
                             </div>
                             
                             <div style="margin-bottom: 1rem;">
                                 <div style="font-weight: 500; margin-bottom: 0.5rem;">Payment Status</div>
-                                <span class="status-badge ${order.payment_status === 'completed' ? 'status-paid' : 'status-pending'}">
+                                <span class="status-badge ${(order.payment_status || 'pending') === 'completed' ? 'status-paid' : 'status-pending'}">
                                     ${order.payment_status || 'pending'}
                                 </span>
                             </div>
@@ -806,9 +1024,9 @@ async function viewOrderDetails(orderId) {
                             </div>
                         </div>
                         
-                        ${order.status !== 'delivered' ? `
+                        ${(order.status || 'pending') !== 'delivered' ? `
                         <div style="margin-top: 2rem;">
-                            <button class="btn btn-success" style="width: 100%;" onclick="confirmReceipt('${order.order_id}')">
+                            <button class="btn btn-success" style="width: 100%;" onclick="confirmReceipt('${order.order_id || order.id}')">
                                 <i class="fas fa-check"></i> Confirm Receipt & Notify Customer
                             </button>
                         </div>
@@ -845,7 +1063,7 @@ async function confirmReceipt(orderId) {
             closeModal('orderDetailModal');
             loadSection('orders'); // Refresh orders list
         } else {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.message || 'Failed to confirm order');
         }
     } catch (error) {
@@ -868,12 +1086,12 @@ async function updateOrderStatus(orderId, status) {
         if (response.ok) {
             showNotification('Order status updated', 'success');
             // Update local state
-            const order = adminState.orders.find(o => o.order_id === orderId);
+            const order = adminState.orders.find(o => (o.order_id === orderId || o.id === orderId));
             if (order) {
                 order.status = status;
             }
         } else {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             throw new Error(errorData.message || 'Failed to update status');
         }
     } catch (error) {
@@ -882,7 +1100,7 @@ async function updateOrderStatus(orderId, status) {
     }
 }
 
-// Map Functions - FIXED
+// Map Functions
 let adminMap = null;
 
 // Make showOrderLocation globally available
@@ -890,7 +1108,7 @@ window.showOrderLocation = function(lat, lng) {
     const modal = document.getElementById('mapModal');
     const mapElement = document.getElementById('adminMap');
     
-    if (!mapElement) {
+    if (!modal || !mapElement) {
         showNotification('Map element not found', 'error');
         return;
     }
@@ -1088,15 +1306,20 @@ window.deleteProduct = function(id) {
 // Export functions
 function exportOrders() {
     const data = adminState.orders.map(order => ({
-        'Order ID': order.order_id,
-        'Customer': order.customer_name,
-        'Email': order.customer_email,
-        'Phone': order.customer_phone,
-        'Amount': `KSh ${order.total_amount}`,
-        'Status': order.status,
-        'Payment': order.payment_status,
-        'Date': new Date(order.created_at).toLocaleString()
+        'Order ID': order.order_id || order.id,
+        'Customer': order.customer_name || 'N/A',
+        'Email': order.customer_email || 'N/A',
+        'Phone': order.customer_phone || 'N/A',
+        'Amount': `KSh ${order.total_amount || 0}`,
+        'Status': order.status || 'pending',
+        'Payment': order.payment_status || 'pending',
+        'Date': order.created_at ? new Date(order.created_at).toLocaleString() : 'N/A'
     }));
+    
+    if (data.length === 0) {
+        showNotification('No orders to export', 'warning');
+        return;
+    }
     
     // Convert to CSV
     const csv = convertToCSV(data);
@@ -1149,7 +1372,7 @@ document.addEventListener('change', function(e) {
         // Clear existing previews
         preview.innerHTML = '';
         
-        files.forEach(file => {
+        files.slice(0, 5).forEach(file => {
             if (file.size > 5 * 1024 * 1024) {
                 alert(`File ${file.name} is too large. Maximum size is 5MB.`);
                 return;
@@ -1164,7 +1387,7 @@ document.addEventListener('change', function(e) {
                 
                 imgContainer.innerHTML = `
                     <img src="${e.target.result}" style="width: 100px; height: 100px; object-fit: cover; border-radius: 4px;">
-                    <button class="remove-image" onclick="this.parentElement.remove()" 
+                    <button type="button" onclick="this.parentElement.remove()" 
                             style="position: absolute; top: 5px; right: 5px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; font-size: 12px;">
                         <i class="fas fa-times"></i>
                     </button>
@@ -1182,13 +1405,26 @@ document.addEventListener('submit', async function(e) {
     if (e.target.id === 'productForm') {
         e.preventDefault();
         
+        const title = document.getElementById('productTitle').value;
+        const description = document.getElementById('productDescription').value;
+        const type = document.getElementById('productType').value;
+        const price = parseFloat(document.getElementById('productPrice').value);
+        const quantity = parseInt(document.getElementById('productQuantity').value);
+        const in_stock = document.getElementById('productAvailability').value === 'true';
+        
+        // Basic validation
+        if (!title || !description || !type || isNaN(price) || isNaN(quantity)) {
+            showNotification('Please fill all required fields', 'error');
+            return;
+        }
+        
         const formData = new FormData();
-        formData.append('title', document.getElementById('productTitle').value);
-        formData.append('description', document.getElementById('productDescription').value);
-        formData.append('type', document.getElementById('productType').value);
-        formData.append('price', document.getElementById('productPrice').value);
-        formData.append('quantity', document.getElementById('productQuantity').value);
-        formData.append('in_stock', document.getElementById('productAvailability').value);
+        formData.append('title', title);
+        formData.append('description', description);
+        formData.append('type', type);
+        formData.append('price', price);
+        formData.append('quantity', quantity);
+        formData.append('in_stock', in_stock);
         
         // Add images
         const imageInput = document.getElementById('imageInput');
@@ -1209,7 +1445,7 @@ document.addEventListener('submit', async function(e) {
                 showNotification('Product added successfully!', 'success');
                 loadSection('products');
             } else {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || 'Failed to add product');
             }
         } catch (error) {
@@ -1244,6 +1480,15 @@ adminStyle.textContent = `
         }
     }
     
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+    
     /* Print styles for receipts */
     @media print {
         .sidebar, .header, .no-print {
@@ -1273,5 +1518,59 @@ adminStyle.textContent = `
         z-index: 10000;
         animation: slideIn 0.3s ease;
     }
+    
+    .image-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    .image-preview img {
+        border-radius: 4px;
+        object-fit: cover;
+    }
+    
+    .remove-image {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        background: #ef4444;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        cursor: pointer;
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
 `;
 document.head.appendChild(adminStyle);
+
+// Debug helper
+window.adminDebug = {
+    clearLogin: function() {
+        localStorage.clear();
+        location.reload();
+    },
+    testLogin: async function(email, password) {
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/admin/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
+            return {
+                status: response.status,
+                data: await response.json().catch(() => ({ error: 'Invalid JSON' }))
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
+    }
+};
+
+console.log('Admin panel loaded successfully');
