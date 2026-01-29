@@ -47,7 +47,7 @@ function checkAdminAuth() {
 
 async function verifyToken() {
     try {
-        const response = await fetch('https://kuku-yetu.onrender.com//api/admin/verify', {
+       const response = await fetch('https://kuku-yetu.onrender.com/api/admin/verify', {
             headers: {
                 'Authorization': `Bearer ${adminState.token}`
             }
