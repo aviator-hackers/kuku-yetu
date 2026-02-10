@@ -115,6 +115,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+
 // Admin authentication middleware
 const authenticateAdmin = async (req, res, next) => {
   try {
@@ -141,6 +142,8 @@ const authenticateAdmin = async (req, res, next) => {
 
 // Admin login
 app.post('/api/admin/login', async (req, res) => {
+  console.log('ENV JWT_SECRET:', JSON.stringify(process.env.JWT_SECRET));
+  console.log('ENV JWT_SECRET length:', process.env.JWT_SECRET?.length);
   const { email, password } = req.body;
 
   try {
